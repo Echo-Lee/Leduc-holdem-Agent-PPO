@@ -17,9 +17,20 @@ def load_config(config_path="running_config.yaml"):
 def main():
     cfg = load_config(config_path="running_config.yaml")
 
+    use_opp = cfg['system']['use_opponent_model']
+    sp_enabled = cfg['selfplay']['enabled']
+
+    model_tag = "w-OppM" if use_opp else "no-OppM"
+    mode_tag = f"SP-U{cfg['selfplay']['update_every']}" if sp_enabled else f"Static-{cfg['opponent']['style']}"
+    
+    run_name = f"{mode_tag}_{model_tag}_lr{cfg['train']['lr']}"
+    group_name = "Self-Play-Exploration" if sp_enabled else "Baseline-Tests"
+
     wandb.init(
         project=cfg['wandb']['project'],
-        name=f"ppo_{cfg['opponent']['style']}_use_oppo_model_lr{cfg['system']['use_opponent_model']}",
+        name=run_name,
+        group=group_name,
+        tags=["Leduc", mode_tag, model_tag],
         config=cfg,
     )
 
@@ -38,27 +49,15 @@ def main():
     # Actions = {0: Call, 1: Raise, 2: Fold, 3: Check}
     raw_obs_dim = len(first_obs["observation"])
     action_dim = 4
-    use_opponent_model = cfg['system']['use_opponent_model']
 
     print(f"Detected observation dim = {raw_obs_dim}")
 
-    agent_obs_dim = raw_obs_dim + (action_dim if use_opponent_model else 0)
+    agent_obs_dim = raw_obs_dim + action_dim
 
     # Instantiate agents and models
-    if use_opponent_model:
-        opp_predictor = OpponentPredictor(
-            obs_dim=raw_obs_dim, 
-            act_dim=action_dim,
-            device=device,
-            lr=cfg['opponent']['predictor_lr']
-        )
-    else:
-        opp_predictor = None
-
     policy_net = PolicyNet(input_dim=agent_obs_dim, output_dim=action_dim)
     value_net = ValueNet(input_dim=agent_obs_dim)
-    opponent_agent = RuleBasedAgent(device=device, style=cfg['opponent']['style'])
-
+    
     agent = PPOAgent(
         policy_net=policy_net,
         value_net=value_net,
@@ -73,14 +72,53 @@ def main():
         entropy_coef=cfg['ppo']['entropy_coef']
     )
 
-    runner = Runner(env, agent, opp_predictor, opponent_agent=opponent_agent)
+    # set up opponent model based on config
+    if use_opp:
+        opp_predictor = OpponentPredictor(
+            obs_dim=raw_obs_dim, 
+            act_dim=action_dim,
+            device=device,
+            lr=cfg['opponent']['predictor_lr']
+        )
+    else:
+        opp_predictor = None
 
-    print(f"Starting training against {cfg['opponent']['style']} opponent...")
 
-    reward_history, win_rate_history, opp_loss_history, opp_acc_history = [], [], [], []
+    # set up opponent agent based on config
+    if sp_enabled:
+        mirror_policy = PolicyNet(agent_obs_dim, action_dim)
+        mirror_value = ValueNet(agent_obs_dim)
+        opponent_agent = PPOAgent(
+            policy_net=mirror_policy,
+            value_net=mirror_value,
+            device=device
+        )
+        opponent_agent.policy.load_state_dict(agent.policy.state_dict())
+        opponent_agent.value.load_state_dict(agent.value.state_dict())
+    else:
+        opponent_agent = RuleBasedAgent(style=cfg['opponent']['style'], device=device)
+
+    # use_model_logic: whether the RLagent should use the opponent model's prediction as part of its observation input for action selection
+    # If not, concatenate a zero vector instead to keep the input dimension consistent.
+    runner = Runner(env, agent, opp_predictor, opponent_agent=opponent_agent, use_model_logic=use_opp)
+
+    if sp_enabled:
+        print(f"Starting self-play training against mirror opponent...")
+    elif use_opp:
+        print(f"Starting training against {cfg['opponent']['style']} opponent with opponent model...")
+    else:
+        print(f"Starting training against {cfg['opponent']['style']} opponent without opponent model...")
+
+    # reward_history, win_rate_history, opp_loss_history, opp_acc_history = [], [], [], []
     # policy_loss_history, value_loss_history, entropy_history = [], [], []
 
     for iteration in range(cfg['train']['num_iterations']):
+        # Self-play update: periodically update opponent agent to mirror current policy
+        if sp_enabled and iteration > 0 and iteration % cfg['selfplay']['update_every'] == 0:
+            print(f"Iteration {iteration}: [Self-Play] updating opponent agent to mirror current policy...")
+            opponent_agent.policy.load_state_dict(agent.policy.state_dict())
+            opponent_agent.value.load_state_dict(agent.value.state_dict())
+
         # Collect trajectories by running episodes in the environment
         batch_tensors, avg_reward, win_rate, opp_loss, opp_acc = runner.collect_batch(
             num_episodes=cfg['train']['episodes_per_batch']
@@ -91,10 +129,10 @@ def main():
         # policy_loss, value_loss, entropy = agent.update(batch_tensors)
 
         # Record metrics for plotting
-        reward_history.append(avg_reward)
-        win_rate_history.append(win_rate)
-        opp_loss_history.append(opp_loss)
-        opp_acc_history.append(opp_acc)
+        # reward_history.append(avg_reward)
+        # win_rate_history.append(win_rate)
+        # opp_loss_history.append(opp_loss)
+        # opp_acc_history.append(opp_acc)
         # policy_loss_history.append(policy_loss)
         # value_loss_history.append(value_loss)
         # entropy_history.append(entropy)

@@ -1,6 +1,6 @@
 system:
   device: "auto" # "cuda", "cpu", "auto"
-  use_opponent_model: False
+  use_opponent_model: True
 
 train:
   episodes_per_batch: 256
@@ -17,8 +17,12 @@ ppo:
   entropy_coef: 0.01
 
 opponent:
-  style: "random" # "aggressive", "conservative", "random"
+  style: "aggressive" # "aggressive", "conservative", "random"
   predictor_lr: 0.001
 
 wandb:
-  project: "Leduc-Holdem-PPO"
+  project: "Leduc-Holdem-PPO-selfplay"
+
+selfplay:
+  enabled: True
+  update_every: 50 # Update opponent model every N iterations

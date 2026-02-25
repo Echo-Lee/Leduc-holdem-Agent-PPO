@@ -5,20 +5,27 @@ which is responsible for managing the interaction between the agent and the envi
 import torch
 import numpy as np
 
+from core.agents.ppo_agent import PPOAgent
+
 class Runner:
-    def __init__(self, env, agent, opponent_model=None, opponent_agent=None):
+    def __init__(self, env, agent, opponent_model=None, opponent_agent=None, use_model_logic=True):
         self.env = env
         self.agent = agent
         self.opp_model = opponent_model
         self.opp_agent = opponent_agent
         self.device = agent.device
+        self.self_play_mode = isinstance(opponent_agent, PPOAgent)
+        self.use_model_logic = use_model_logic
     
-    def _get_processed_obs(self, raw_obs) -> np.ndarray:
+    def _get_processed_obs(self, raw_obs, blind=False) -> np.ndarray:
         """If use opponent model, concatenate the predicted opponent action distribution to the raw observation."""
-        if self.opp_model is not None:
-            opp_pred = self.opp_model.predict(raw_obs)
-            return np.concatenate([raw_obs, opp_pred])
-        return raw_obs
+        # blind: whether to blind the RL agent from the opponent model's prediction, used for ablation comparison
+        if blind or self.opp_model is None:
+            padding = np.zeros(4, dtype=np.float32)
+            return np.concatenate([raw_obs, padding])
+
+        opp_pred = self.opp_model.predict(raw_obs)
+        return np.concatenate([raw_obs, opp_pred])
     
     def run_one_episode(self) -> tuple[dict[str, list], float]:
         """
@@ -60,8 +67,9 @@ class Runner:
                     self.env.step(None)
                     p0_final_reward = reward
                     continue
-
-                state = self._get_processed_obs(raw_obs)
+                
+                p0_is_blind = not self.use_model_logic
+                state = self._get_processed_obs(raw_obs, blind=p0_is_blind)
                 mask = obs["action_mask"] # already numpy array
 
                 # torch.Tensor: action, log_prob, value
@@ -80,20 +88,25 @@ class Runner:
                     self.env.step(None)
                     continue
                 
-                else:
-                    if self.opp_agent is not None:
-                        action_tensor, _ = self.opp_agent.get_action(obs["observation"], obs["action_mask"])
-                        action = action_tensor.item()
+                if self.opp_agent is not None:
+                    if self.self_play_mode:
+                        # Self-play: feed in 40 dim obs but padding
+                        opp_state = self._get_processed_obs(raw_obs, blind=True)
+                        action_tensor, _ = self.opp_agent.get_action(opp_state, obs["action_mask"])
                     else:
-                        valid_actions = np.where(obs["action_mask"] == 1)[0]
-                        # Random opponent policy for now
-                        action = np.random.choice(valid_actions)
-                    if player_0_last_raw_obs is not None:
+                        # Rule-based opponent: feed in the raw 36 dim obs without opponent model prediction
+                        action_tensor, _ = self.opp_agent.get_action(obs["observation"], obs["action_mask"])
+                    action = action_tensor.item()
+                else:
+                    # random opponent
+                    valid_actions = np.where(obs["action_mask"] == 1)[0]
+                    action = np.random.choice(valid_actions)
+
+                if player_0_last_raw_obs is not None:
                         trajectory['opp_states'].append(player_0_last_raw_obs)
                         trajectory['opp_actions'].append(action)
-                    
-                    # Step the environment with opponent's action
-                    self.env.step(int(action))
+                # Step the environment with opponent's action
+                self.env.step(int(action))
         return trajectory, p0_final_reward
 
     def collect_batch(self, num_episodes):
@@ -117,7 +130,7 @@ class Runner:
         
         # Train opponent model with collected opponent trajectories
         opp_loss, opp_acc = 0.0, 0.0
-        if self.opp_model is not None and len(batch_trajectories['opp_states']) > 0:
+        if self.opp_model is not None and self.use_model_logic and len(batch_trajectories['opp_states']) > 0:
             opp_states_batch = np.stack(batch_trajectories['opp_states'])
             opp_act_batch = np.array(batch_trajectories['opp_actions'])
             
