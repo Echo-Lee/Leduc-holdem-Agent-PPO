@@ -4,6 +4,7 @@ import yaml
 import numpy as np
 import gradio as gr
 import torch
+import uuid
 from pettingzoo.classic import texas_holdem_v4
 from pathlib import Path
 
@@ -89,52 +90,31 @@ def render_state_md(obs_h, legal_mask, done, winner_text, stacks_text):
     raises = decode_round_raises(obs_h["observation"])
     raises_str = ", ".join([str(x) if x is not None else "-" for x in raises])
 
-    # Get legal actions
-    legal_actions = [ACTIONS[i] for i in range(4) if legal_mask[i] == 1]
-    legal_html = " | ".join([f"<span style='color: #FFD700;'>{ACTION_EMOJI[i]} {ACTIONS[i]}</span>"
-                             for i in range(4) if legal_mask[i] == 1])
-
     if done:
-        end_section = f"""
-<div style='background: linear-gradient(135deg, #1e3a20 0%, #2d5a2d 100%);
-            padding: 20px; border-radius: 15px; margin: 20px 0;
-            border: 2px solid #FFD700; box-shadow: 0 0 30px rgba(255,215,0,0.3);'>
-    <h2 style='color: #FFD700; text-align: center; margin: 0; text-shadow: 0 0 10px rgba(255,215,0,0.5);'>
-        🏆 {winner_text}
-    </h2>
+        result_html = f"""
+<div style='background: #1e3a20; padding: 8px; border-radius: 6px; margin: 6px 0;
+            border: 2px solid #FFD700; text-align: center;'>
+    <div style='color: #FFD700; font-weight: bold; font-size: 14px;'>🏆 {winner_text}</div>
 </div>
 """
     else:
-        end_section = ""
+        result_html = ""
 
     return f"""
 <div style='background: linear-gradient(135deg, #0f1e0f 0%, #1a2e1a 100%);
-            padding: 25px; border-radius: 20px;
-            border: 3px solid #2d5a2d; box-shadow: 0 8px 32px rgba(0,0,0,0.4);'>
+            padding: 8px; border-radius: 8px; border: 2px solid #2d5a2d;'>
 
-    <div style='display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;'>
-        <div style='color: #90EE90; font-size: 18px; font-weight: bold;'>
-            💰 {stacks_text}
-        </div>
+    <div style='color: #90EE90; font-size: 13px; font-weight: bold; margin-bottom: 6px;'>
+        💰 {stacks_text}
     </div>
 
-    <div style='background: rgba(0,0,0,0.3); padding: 12px; border-radius: 10px; margin: 10px 0;'>
-        <div style='color: #9CA3AF; font-size: 14px;'>Betting History (per round):</div>
-        <div style='color: #D1D5DB; font-size: 16px; font-family: monospace;'>{raises_str}</div>
+    <div style='background: rgba(0,0,0,0.3); padding: 6px; border-radius: 6px; margin: 6px 0;'>
+        <div style='color: #9CA3AF; font-size: 10px;'>Betting Rounds:</div>
+        <div style='color: #D1D5DB; font-size: 12px; font-family: monospace;'>{raises_str}</div>
     </div>
 
-    <div style='background: rgba(255,215,0,0.1); padding: 15px; border-radius: 10px;
-                border-left: 4px solid #FFD700; margin: 15px 0;'>
-        <div style='color: #FFD700; font-size: 16px; font-weight: bold; margin-bottom: 8px;'>
-            ✨ Your Available Actions:
-        </div>
-        <div style='color: #F3F4F6; font-size: 18px;'>
-            {legal_html if legal_html else "<span style='color: #EF4444;'>⏸️ Waiting for opponent...</span>"}
-        </div>
-    </div>
+    {result_html}
 </div>
-
-{end_section}
 """
 
 
@@ -349,24 +329,44 @@ class MatchState:
             return (
                 f"<div style='text-align: center; padding: 40px;'><h2 style='color: #FFD700;'>🎰 Welcome to Texas Hold'em</h2><p style='color: #9CA3AF;'>{self.stacks_text()}</p><p style='color: #60A5FA;'>Click 'Deal New Hand' to start playing!</p></div>",
                 "\n".join(self.history) if self.history else "Ready to play...",
-                [], [], []
+                [], [], [],
+                gr.update(interactive=False), gr.update(interactive=False), gr.update(interactive=False), gr.update(interactive=False),
+                ""
             )
         board_g, hero_g, opp_g, legal_mask, obs0 = self.hand.galleries()
         winner_text = self.hand.winner_text() if self.hand.done else ""
         md = render_state_md(obs0, legal_mask, self.hand.done, winner_text, stacks_text=self.stacks_text())
-        return md, "\n".join(self.history), board_g, hero_g, opp_g
+
+        # Update button states based on legal actions
+        btn_call_update = gr.update(interactive=bool(legal_mask[0]))
+        btn_raise_update = gr.update(interactive=bool(legal_mask[1]))
+        btn_fold_update = gr.update(interactive=bool(legal_mask[2]))
+        btn_check_update = gr.update(interactive=bool(legal_mask[3]))
+
+        # Chips display
+        chips_html = f"<div style='color: #FFD700; font-size: 13px; font-weight: bold; text-align: center; padding: 3px; margin: 3px 0;'>💰 Your Chips: {self.stack['player_0']:.1f}</div>"
+
+        return md, "\n".join(self.history), board_g, hero_g, opp_g, btn_call_update, btn_raise_update, btn_fold_update, btn_check_update, chips_html
 
 
 # -----------------------------
 # Initialize agent (lazy loading)
 # -----------------------------
 _agent_policy = None
+_sessions = {}  # Server-side session storage: {session_id: MatchState}
 
 def get_agent():
     global _agent_policy
     if _agent_policy is None:
         _agent_policy = AgentPolicy(MODEL_PATH, CONFIG_PATH, device="cpu")
     return _agent_policy
+
+def get_session(session_id):
+    """Get or create a session's MatchState"""
+    if session_id not in _sessions:
+        agent = get_agent()
+        _sessions[session_id] = MatchState(agent, initial_stack=DEFAULT_INITIAL_STACK)
+    return _sessions[session_id]
 
 
 # -----------------------------
@@ -384,123 +384,179 @@ def _parse_seed(seed_text):
     return seed
 
 
-def start_match(initial_stack):
+def start_match(session_id, initial_stack):
     agent = get_agent()
     ms = MatchState(agent, initial_stack=int(float(initial_stack)))
     ms.history.append(f"🎰 New Match Started (starting chips: {int(float(initial_stack))})")
     ms.start_new_hand(seed=None)
     if ms.hand.done:
         ms.apply_payout_if_done()
-    return ms, *ms.view_outputs()
+    _sessions[session_id] = ms  # Store in server-side storage
+    return session_id, *ms.view_outputs()
 
 
-def new_hand(match_state, seed_text):
-    agent = get_agent()
-    if match_state is None:
-        match_state = MatchState(agent, initial_stack=DEFAULT_INITIAL_STACK)
-        match_state.history.append(f"🎰 New Match Started (starting chips: {DEFAULT_INITIAL_STACK})")
+def new_hand(session_id, seed_text):
+    ms = get_session(session_id)
     seed = _parse_seed(seed_text)
-    match_state.start_new_hand(seed=seed)
-    if match_state.hand.done:
-        match_state.apply_payout_if_done()
-    return match_state, *match_state.view_outputs()
+    ms.start_new_hand(seed=seed)
+    if ms.hand.done:
+        ms.apply_payout_if_done()
+    return session_id, *ms.view_outputs()
 
 
-def do_action(match_state, action_int):
-    agent = get_agent()
-    if match_state is None:
-        match_state = MatchState(agent, initial_stack=DEFAULT_INITIAL_STACK)
-        match_state.history.append(f"🎰 New Match Started (starting chips: {DEFAULT_INITIAL_STACK})")
-        match_state.start_new_hand(seed=None)
-    if match_state.hand is None:
-        match_state.start_new_hand(seed=None)
-    match_state.hand.step_human(int(action_int))
-    match_state.sync_new_hand_log_lines()
-    if match_state.hand.done:
-        match_state.apply_payout_if_done()
-    return match_state, *match_state.view_outputs()
+def do_action(session_id, action_int):
+    ms = get_session(session_id)
+    if ms.hand is None:
+        ms.start_new_hand(seed=None)
+    ms.hand.step_human(int(action_int))
+    ms.sync_new_hand_log_lines()
+    if ms.hand.done:
+        ms.apply_payout_if_done()
+    return session_id, *ms.view_outputs()
 
 
 # -----------------------------
 # Dark Casino Theme & UI
 # -----------------------------
 CUSTOM_CSS = """
-/* Dark Casino Theme */
+/* Dark Casino Theme - Compact Layout */
 .gradio-container {
     background: linear-gradient(135deg, #0a0f0a 0%, #1a1f1a 100%) !important;
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    max-height: 100vh !important;
+    overflow-y: auto !important;
 }
 
-/* Card gallery styling */
+/* Remove excessive padding */
+.gradio-container .block {
+    padding: 2px !important;
+    margin: 2px 0 !important;
+}
+
+/* Compact rows */
+.gradio-container .row {
+    gap: 6px !important;
+    margin: 2px 0 !important;
+}
+
+/* Compact columns */
+.gradio-container .column {
+    padding: 2px !important;
+}
+
+/* Card gallery styling - compact with forced size limits */
 .gradio-container .gallery {
-    background: rgba(0, 0, 0, 0.3) !important;
-    border-radius: 15px !important;
-    padding: 15px !important;
-    border: 2px solid #2d5a2d !important;
+    height: 85px !important;
+    min-height: 85px !important;
+    max-height: 85px !important;
+    background: rgba(0, 0, 0, 0.2) !important;
+    border: 1px solid #2d5a2d !important;
+    border-radius: 6px !important;
+    margin: 1px 0 !important;
+    display: flex !important;
+    justify-content: center !important;
 }
 
+/* Force absolute size limits on high-res card images */
 .gradio-container .gallery img {
+    height: 70px !important;
+    width: auto !important;
+    max-width: 50px !important;
     object-fit: contain !important;
-    border-radius: 8px !important;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5) !important;
+    border-radius: 4px !important;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.5) !important;
     transition: transform 0.2s ease !important;
 }
 
 .gradio-container .gallery img:hover {
-    transform: scale(1.05) !important;
+    transform: scale(1.03) !important;
 }
 
-/* Button styling - Casino gold theme */
+/* Remove internal padding that pushes large images out */
+.gradio-container .gallery .grid-wrap {
+    padding: 2px !important;
+}
+
+/* Button styling - Casino gold theme - More compact */
 .gradio-container button {
     background: linear-gradient(135deg, #FFD700 0%, #FFA500 100%) !important;
     color: #000 !important;
     font-weight: bold !important;
     border: none !important;
-    border-radius: 10px !important;
-    padding: 12px 24px !important;
-    font-size: 16px !important;
-    box-shadow: 0 4px 15px rgba(255, 215, 0, 0.3) !important;
-    transition: all 0.3s ease !important;
+    border-radius: 6px !important;
+    padding: 0px 10px !important;
+    font-size: 13px !important;
+    box-shadow: 0 2px 8px rgba(255, 215, 0, 0.3) !important;
+    transition: all 0.2s ease !important;
+    min-height: 30px !important;
+    height: 30px !important;
 }
 
-.gradio-container button:hover {
+.gradio-container button:hover:not(:disabled) {
     background: linear-gradient(135deg, #FFA500 0%, #FFD700 100%) !important;
-    transform: translateY(-2px) !important;
-    box-shadow: 0 6px 20px rgba(255, 215, 0, 0.5) !important;
+    transform: translateY(-1px) !important;
+    box-shadow: 0 4px 15px rgba(255, 215, 0, 0.5) !important;
 }
 
-.gradio-container button:active {
+.gradio-container button:active:not(:disabled) {
     transform: translateY(0px) !important;
 }
 
+/* Disabled buttons - grayed out */
+.gradio-container button:disabled {
+    background: linear-gradient(135deg, #4a4a4a 0%, #2a2a2a 100%) !important;
+    color: #666 !important;
+    opacity: 0.5 !important;
+    cursor: not-allowed !important;
+    box-shadow: none !important;
+}
+
 /* Primary button (Start Match / Deal Hand) */
-.gradio-container button.primary {
+.gradio-container button.primary:not(:disabled) {
     background: linear-gradient(135deg, #10B981 0%, #059669 100%) !important;
     color: white !important;
 }
 
-.gradio-container button.primary:hover {
+.gradio-container button.primary:hover:not(:disabled) {
     background: linear-gradient(135deg, #059669 0%, #10B981 100%) !important;
 }
 
 /* Secondary button (New Hand) */
-.gradio-container button.secondary {
+.gradio-container button.secondary:not(:disabled) {
     background: linear-gradient(135deg, #3B82F6 0%, #2563EB 100%) !important;
     color: white !important;
 }
 
-/* Input fields */
+/* Input fields - compact */
 .gradio-container input, .gradio-container textarea {
     background: rgba(0, 0, 0, 0.4) !important;
-    border: 2px solid #2d5a2d !important;
+    border: 1px solid #2d5a2d !important;
     color: #E5E7EB !important;
-    border-radius: 10px !important;
+    border-radius: 6px !important;
+    font-size: 12px !important;
+    padding: 4px 6px !important;
+    min-height: 32px !important;
 }
 
-/* Labels */
+/* Labels - smaller */
 .gradio-container label {
     color: #9CA3AF !important;
     font-weight: 600 !important;
+    font-size: 12px !important;
+    margin-bottom: 2px !important;
+}
+
+/* Number inputs */
+.gradio-container input[type="number"] {
+    min-height: 32px !important;
+    height: 32px !important;
+}
+
+/* Compact input styling */
+.compact-input input {
+    height: 28px !important;
+    min-height: 28px !important;
+    padding: 4px 6px !important;
 }
 
 /* Markdown content */
@@ -508,20 +564,24 @@ CUSTOM_CSS = """
     color: #E5E7EB !important;
 }
 
-/* Textbox for history */
+/* Textbox for history - compact */
 .gradio-container textarea {
     font-family: 'Courier New', monospace !important;
-    font-size: 14px !important;
+    font-size: 11px !important;
+    line-height: 1.2 !important;
+    padding: 4px !important;
 }
 
-/* Header styling */
+/* Header styling - compact */
 h1, h2, h3 {
     color: #FFD700 !important;
     text-shadow: 0 0 10px rgba(255, 215, 0, 0.3) !important;
+    margin: 2px 0 !important;
+    line-height: 1.2 !important;
 }
 """
 
-CARD_HEIGHT = 220
+CARD_HEIGHT = 85  # Compact card size matching CSS constraints
 
 # Create custom theme
 casino_theme = gr.themes.Base(
@@ -537,123 +597,112 @@ casino_theme = gr.themes.Base(
 )
 
 with gr.Blocks(css=CUSTOM_CSS, theme=casino_theme, title="🎰 Texas Hold'em AI") as demo:
+    # Session-based storage (serializable for Gradio 5.x)
+    session_id = gr.State(lambda: str(uuid.uuid4()))
+
+    # Compact header
     gr.HTML("""
-        <div style='text-align: center; padding: 30px; background: linear-gradient(135deg, #1e3a20 0%, #0f1e0f 100%);
-                    border-radius: 20px; margin-bottom: 30px; border: 3px solid #FFD700;
-                    box-shadow: 0 0 40px rgba(255,215,0,0.2);'>
-            <h1 style='margin: 0; font-size: 48px; background: linear-gradient(135deg, #FFD700 0%, #FFA500 100%);
-                       -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-                       text-shadow: none;'>
-                🎰 Texas Hold'em PPO Agent
-            </h1>
-            <p style='color: #9CA3AF; font-size: 18px; margin: 10px 0 0 0;'>
-                Play against a reinforcement learning AI trained with PPO
-            </p>
+        <div style='text-align: center; padding: 6px; background: linear-gradient(135deg, #1e3a20 0%, #0f1e0f 100%);
+                    border-radius: 8px; margin-bottom: 6px; border: 2px solid #FFD700;'>
+            <h1 style='margin: 0; font-size: 20px; color: #FFD700;'>🎰 Texas Hold'em PPO Agent</h1>
         </div>
     """)
 
-    match_state = gr.State(None)
-
+    # Controls in compact row
     with gr.Row():
-        with gr.Column(scale=2):
-            stack_in = gr.Number(label="💰 Starting Chips (each player)", value=DEFAULT_INITIAL_STACK, precision=0)
-        with gr.Column(scale=1):
-            start_match_btn = gr.Button("🎲 Start New Match", variant="primary", size="lg")
+        stack_in = gr.Number(label="💰 Chips", value=DEFAULT_INITIAL_STACK, precision=0, scale=1, elem_classes="compact-input")
+        start_match_btn = gr.Button("🎲 New Match", variant="primary", scale=1, size="sm")
+        seed_in = gr.Textbox(label="🎲 Seed", placeholder="Random", scale=1, elem_classes="compact-input")
+        new_hand_btn = gr.Button("🎴 Deal Hand", variant="secondary", scale=1, size="sm")
 
+    # Main playing area - compact single view
     with gr.Row():
-        with gr.Column(scale=2):
-            seed_in = gr.Textbox(label="🎲 Seed (optional)", placeholder="Leave blank for random")
-        with gr.Column(scale=1):
-            new_hand_btn = gr.Button("🎴 Deal New Hand", variant="secondary", size="lg")
-
-    table_md = gr.HTML()
-
-    gr.HTML("<h2 style='text-align: center; color: #FFD700; margin: 30px 0 20px 0;'>🃏 Community Cards</h2>")
-    board_gallery = gr.Gallery(
-        label="Board",
-        columns=5,
-        rows=1,
-        height=CARD_HEIGHT,
-        object_fit="contain",
-        show_label=False
-    )
-
-    gr.HTML("<h2 style='text-align: center; color: #FFD700; margin: 30px 0 20px 0;'>🎴 Hole Cards</h2>")
-    with gr.Row():
-        with gr.Column():
-            gr.HTML("<h3 style='text-align: center; color: #10B981;'>👤 Your Cards</h3>")
-            hero_gallery = gr.Gallery(
-                columns=2,
-                rows=1,
-                height=CARD_HEIGHT,
-                object_fit="contain",
-                show_label=False
-            )
-        with gr.Column():
-            gr.HTML("<h3 style='text-align: center; color: #EF4444;'>🤖 Agent's Cards</h3>")
+        with gr.Column(scale=3):
+            # Agent's cards at top
+            gr.HTML("<div style='text-align: center; color: #EF4444; font-weight: bold; font-size: 12px; margin: 2px 0;'>🤖 Agent's Cards</div>")
             opp_gallery = gr.Gallery(
                 columns=2,
                 rows=1,
-                height=CARD_HEIGHT,
+                height=85,
                 object_fit="contain",
-                show_label=False
+                show_label=False,
+                preview=False
             )
 
-    gr.HTML("""
-        <div style='text-align: center; margin: 30px 0 15px 0;'>
-            <h2 style='color: #FFD700;'>🎯 Your Actions</h2>
-            <p style='color: #9CA3AF;'>Choose your move</p>
-        </div>
-    """)
+            # Community cards in center
+            gr.HTML("<div style='text-align: center; color: #FFD700; font-weight: bold; font-size: 12px; margin: 5px 0 2px 0;'>🃏 Board</div>")
+            board_gallery = gr.Gallery(
+                columns=5,
+                rows=1,
+                height=85,
+                object_fit="contain",
+                show_label=False,
+                preview=False
+            )
 
-    with gr.Row():
-        btn_call = gr.Button("📞 Call", size="lg")
-        btn_raise = gr.Button("💰 Raise", size="lg")
-        btn_fold = gr.Button("🚫 Fold", size="lg")
-        btn_check = gr.Button("✅ Check", size="lg")
+            # Player's cards at bottom
+            gr.HTML("<div style='text-align: center; color: #10B981; font-weight: bold; font-size: 12px; margin: 5px 0 2px 0;'>👤 Your Cards</div>")
+            hero_gallery = gr.Gallery(
+                columns=2,
+                rows=1,
+                height=85,
+                object_fit="contain",
+                show_label=False,
+                preview=False
+            )
 
-    gr.HTML("<h3 style='text-align: center; color: #FFD700; margin: 30px 0 15px 0;'>📜 Action History</h3>")
-    history = gr.Textbox(label="", lines=18, show_label=False)
+            # Chips display
+            chips_display = gr.HTML("<div style='color: #FFD700; font-size: 13px; font-weight: bold; text-align: center; padding: 3px; margin: 3px 0;'>💰 Your Chips: --</div>")
 
-    gr.HTML("""
-        <div style='text-align: center; padding: 20px; color: #6B7280; margin-top: 30px;
-                    border-top: 1px solid #2d5a2d;'>
-            <p>🤖 Powered by PPO Reinforcement Learning | Built with Gradio & PettingZoo</p>
-        </div>
-    """)
+            # Action buttons - MUST be visible!
+            with gr.Row():
+                btn_call = gr.Button("📞 Call", size="sm", interactive=False)
+                btn_raise = gr.Button("💰 Raise", size="sm", interactive=False)
+                btn_fold = gr.Button("🚫 Fold", size="sm", interactive=False)
+                btn_check = gr.Button("✅ Check", size="sm", interactive=False)
+
+        with gr.Column(scale=1):
+            # Game state info
+            table_md = gr.HTML()
+
+            # Compact action log
+            gr.HTML("<div style='color: #9CA3AF; font-weight: bold; font-size: 12px; margin: 3px 0 2px 0;'>📜 Log</div>")
+            history = gr.Textbox(label="", lines=13, show_label=False, max_lines=13)
 
     # Event handlers
+    outputs_list = [session_id, table_md, history, board_gallery, hero_gallery, opp_gallery, btn_call, btn_raise, btn_fold, btn_check, chips_display]
+
     start_match_btn.click(
         fn=start_match,
-        inputs=[stack_in],
-        outputs=[match_state, table_md, history, board_gallery, hero_gallery, opp_gallery],
+        inputs=[session_id, stack_in],
+        outputs=outputs_list,
     )
 
     new_hand_btn.click(
         fn=new_hand,
-        inputs=[match_state, seed_in],
-        outputs=[match_state, table_md, history, board_gallery, hero_gallery, opp_gallery],
+        inputs=[session_id, seed_in],
+        outputs=outputs_list,
     )
 
     btn_call.click(
-        fn=lambda ms: do_action(ms, 0),
-        inputs=[match_state],
-        outputs=[match_state, table_md, history, board_gallery, hero_gallery, opp_gallery]
+        fn=lambda sid: do_action(sid, 0),
+        inputs=[session_id],
+        outputs=outputs_list
     )
     btn_raise.click(
-        fn=lambda ms: do_action(ms, 1),
-        inputs=[match_state],
-        outputs=[match_state, table_md, history, board_gallery, hero_gallery, opp_gallery]
+        fn=lambda sid: do_action(sid, 1),
+        inputs=[session_id],
+        outputs=outputs_list
     )
     btn_fold.click(
-        fn=lambda ms: do_action(ms, 2),
-        inputs=[match_state],
-        outputs=[match_state, table_md, history, board_gallery, hero_gallery, opp_gallery]
+        fn=lambda sid: do_action(sid, 2),
+        inputs=[session_id],
+        outputs=outputs_list
     )
     btn_check.click(
-        fn=lambda ms: do_action(ms, 3),
-        inputs=[match_state],
-        outputs=[match_state, table_md, history, board_gallery, hero_gallery, opp_gallery]
+        fn=lambda sid: do_action(sid, 3),
+        inputs=[session_id],
+        outputs=outputs_list
     )
 
 
