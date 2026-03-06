@@ -1,218 +1,262 @@
-# Deployment Guide
+# Deployment Guide - Hugging Face Spaces
 
-## 🏆 Hugging Face Spaces (Recommended & Easiest)
+Deploy your Texas Hold'em PPO agent to Hugging Face Spaces for free hosting with no size limits.
 
-Hugging Face Spaces is purpose-built for ML apps with large dependencies. This is now the primary deployment method for this project.
+## Why Hugging Face Spaces?
 
-### Why Hugging Face Spaces?
-- ✅ **No size limits** - PyTorch is fine!
-- ✅ **Free hosting** - No credit card required
-- ✅ **Built-in Gradio support** - Zero configuration
-- ✅ **Automatic deployment** - Git push and go live
-- ✅ **Custom domains** available
+✅ **No size limits** - PyTorch and large models are fine!
+✅ **Free hosting** - No credit card required
+✅ **Built-in Gradio support** - Zero configuration needed
+✅ **Automatic deployment** - Git push and go live
+✅ **Custom domains** - Available for your Space
 
-## Quick Deployment to Hugging Face Spaces
+## Prerequisites
+
+- Hugging Face account (free): https://huggingface.co/join
+- Git installed on your machine
+- Trained model file (`.pth`)
+- Poker card images in `poker_cards/` directory
+
+## Method 1: Automated Deployment (Recommended)
+
+Use the provided script for one-command deployment:
+
+```bash
+# Make the script executable
+chmod +x deploy_to_hf.sh
+
+# Deploy (replace with your credentials)
+./deploy_to_hf.sh YOUR_USERNAME texas-holdem-ppo
+```
+
+The script will:
+1. Clone your Space repository
+2. Copy all necessary files
+3. Setup Git LFS for large files
+4. Commit and push to Hugging Face
+
+## Method 2: Manual Deployment
 
 ### Step 1: Create Your Space
 
 1. Go to https://huggingface.co/new-space
-2. Choose a name (e.g., "texas-holdem-ppo-agent")
-3. Select **"Gradio"** as the SDK
-4. Choose **"Public"** (free) or **"Private"**
-5. Click **"Create Space"**
+2. Fill in the form:
+   - **Space name**: `texas-holdem-ppo` (or your choice)
+   - **License**: MIT
+   - **Select SDK**: Choose **"Gradio"**
+   - **Gradio version**: Use default (or 5.16.0)
+   - **Space hardware**: CPU (free tier)
+   - **Visibility**: Public or Private
+3. Click **"Create Space"**
 
-### Step 2: Prepare Your Files
-
-Make sure you have:
-- ✅ `app.py` (dark casino themed UI)
-- ✅ `core/` directory (all Python modules)
-- ✅ `running_config.yaml` (configuration)
-- ✅ `models/SP-U20_w-OppM_lr0.0003_final.pth` (your trained model)
-- ✅ `poker_cards/` directory (card images)
-- ✅ `requirements.txt` (dependencies)
-- ✅ `HF_README.md` (Space description)
-
-### Step 3: Deploy via Git
+### Step 2: Clone Your Space
 
 ```bash
-# Clone your new Space
+# Clone the empty Space repository
 git clone https://huggingface.co/spaces/YOUR_USERNAME/YOUR_SPACE_NAME
 cd YOUR_SPACE_NAME
-
-# Copy README for Space
-cp ../HF_README.md README.md
-
-# Copy your files
-cp -r ../app.py ../core ../running_config.yaml ../models ../poker_cards ../requirements.txt .
-
-# Commit and push
-git add .
-git commit -m "Initial deployment with dark casino theme"
-git push
 ```
 
-### Step 4: Wait for Build
-
-Your Space will automatically:
-1. Install dependencies
-2. Load your model
-3. Launch the Gradio interface
-4. Be live at: `https://huggingface.co/spaces/YOUR_USERNAME/YOUR_SPACE_NAME`
-
-Usually takes 2-5 minutes!
-
-### Step 5: (Optional) Use Git LFS for Large Files
-
-If your model is very large (>10MB), use Git LFS:
+### Step 3: Copy Project Files
 
 ```bash
-# Install Git LFS
+# Copy the Space README (with YAML front matter)
+cp ../RL\ Project/HF_README.md README.md
+
+# Copy application code
+cp ../RL\ Project/app.py .
+cp -r ../RL\ Project/core .
+cp ../RL\ Project/running_config.yaml .
+
+# Copy trained model
+mkdir -p models
+cp ../RL\ Project/models/SP-U20_w-OppM_lr0.0003_final.pth models/
+
+# Copy card images
+cp -r ../RL\ Project/poker_cards .
+
+# Copy dependencies
+cp ../RL\ Project/requirements.txt .
+```
+
+### Step 4: Setup Git LFS (for Large Files)
+
+Git LFS is required for files larger than 10MB (models, images):
+
+```bash
+# Install Git LFS (if not already installed)
 git lfs install
 
-# Track large files
-git lfs track "*.pth"
-git lfs track "*.png"
+# Copy LFS configuration
+cp ../RL\ Project/.gitattributes .
 
-# Add and commit
-git add .gitattributes
-git commit -m "Track large files with LFS"
+# Verify LFS is tracking large files
+cat .gitattributes
+# Should show: *.pth filter=lfs diff=lfs merge=lfs -text
+```
+
+### Step 5: Commit and Push
+
+```bash
+# Stage all files
+git add .
+
+# Commit with a descriptive message
+git commit -m "Deploy Texas Hold'em PPO Agent with dark casino theme"
+
+# Push to Hugging Face
 git push
 ```
 
-## Option 2: Convert Model to ONNX (Smaller)
+### Step 6: Wait for Build
 
-ONNX Runtime is much smaller than PyTorch:
+Your Space will automatically:
+1. Install dependencies from `requirements.txt`
+2. Download large files via Git LFS
+3. Launch the Gradio app
+4. Be live at: `https://huggingface.co/spaces/YOUR_USERNAME/YOUR_SPACE_NAME`
 
+**Build time**: Usually 2-5 minutes
+
+## Troubleshooting
+
+### Build Fails - Missing Dependencies
+
+Check `requirements.txt` is correct. Should contain:
+```txt
+torch==2.10.0
+numpy==2.4.2
+pettingzoo==1.25.0
+gymnasium==1.2.3
+gradio==5.16.0
+PyYAML==6.0.3
+pygame==2.6.1
+pillow==12.1.1
+```
+
+### Model Not Loading
+
+1. Verify model path in `app.py`:
+   ```python
+   MODEL_PATH = os.getenv("MODEL_PATH", "models/SP-U20_w-OppM_lr0.0003_final.pth")
+   ```
+
+2. Check model file exists in `models/` directory
+
+3. Ensure Git LFS is tracking `.pth` files:
+   ```bash
+   git lfs ls-files
+   ```
+
+### Card Images Not Showing
+
+1. Verify `poker_cards/` directory contains all card images
+2. Check image format is `.png`
+3. Naming convention: `AS.png`, `2H.png`, `BACK.png`, etc.
+
+### "Space is building..." Takes Too Long
+
+- Check build logs in your Space's "Logs" tab
+- Large models (~700MB) may take 5-10 minutes on first build
+- Subsequent builds are faster (cached)
+
+## Updating Your Deployment
+
+To update your deployed Space:
+
+```bash
+# Navigate to your Space directory
+cd YOUR_SPACE_NAME
+
+# Make changes to files
+# Then commit and push
+git add .
+git commit -m "Update: description of changes"
+git push
+```
+
+The Space will automatically rebuild with your changes.
+
+## Configuration Options
+
+### Custom Model Path
+
+Set environment variable in Space settings:
+1. Go to your Space → Settings → Variables
+2. Add: `MODEL_PATH` = `models/your_model.pth`
+
+### Change Starting Chips
+
+Edit `app.py`:
 ```python
-# Export your model to ONNX format
-import torch
-from core.networks.policy_value_network import PolicyNet
-
-model = PolicyNet(input_dim=76, output_dim=4, hidden_layers=[256, 256], use_layer_norm=True)
-model.load_state_dict(torch.load("models/SP-U20_w-OppM_lr0.0003_final.pth"))
-model.eval()
-
-dummy_input = torch.randn(1, 76)
-torch.onnx.export(model, dummy_input, "models/policy.onnx",
-                  input_names=['input'], output_names=['output'],
-                  dynamic_axes={'input': {0: 'batch_size'}, 'output': {0: 'batch_size'}})
+DEFAULT_INITIAL_STACK = 100  # Change this value
 ```
 
-Then modify `app.py` to use ONNX Runtime instead of PyTorch.
+### Adjust UI Theme
 
-Update `requirements-vercel.txt`:
-```
-gradio==5.16.0
-numpy==2.4.2
-pettingzoo==1.25.0
-PyYAML==6.0.3
-onnxruntime==1.20.0
-```
-
-## Option 3: Deploy to Railway/Render
-
-These platforms have more generous limits:
-
-### Railway
-```bash
-# Install Railway CLI
-npm i -g @railway/cli
-
-# Login and init
-railway login
-railway init
-
-# Deploy
-railway up
+Modify the color scheme in `app.py`:
+```python
+casino_theme = gr.themes.Base(
+    primary_hue="emerald",     # Change poker table color
+    secondary_hue="amber",     # Change accent color
+    neutral_hue="slate",       # Change neutral colors
+)
 ```
 
-### Render
-1. Connect your GitHub repo
-2. Create a new Web Service
-3. Build command: `pip install -r requirements.txt`
-4. Start command: `python app.py`
+## Testing Locally Before Deployment
 
-## Option 4: Try Vercel with CPU-only PyTorch
-
-Update `requirements-vercel.txt`:
-```
-gradio==5.16.0
-numpy==2.4.2
-pettingzoo==1.25.0
-PyYAML==6.0.3
-torch==2.10.0+cpu --index-url https://download.pytorch.org/whl/cpu
-```
-
-**Note**: This may still exceed limits. Monitor deployment size.
-
-## Vercel Deployment Steps (if within size limits)
-
-1. **Prepare poker card images**:
-   ```bash
-   mkdir -p public/poker_cards
-   # Copy your card images to public/poker_cards/
-   ```
-
-2. **Copy your trained model**:
-   ```bash
-   # Make sure your model is at: models/SP-U20_w-OppM_lr0.0003_final.pth
-   ```
-
-3. **Install Vercel CLI**:
-   ```bash
-   npm i -g vercel
-   ```
-
-4. **Deploy**:
-   ```bash
-   vercel login
-   vercel
-   ```
-
-5. **Set environment variables** (if needed):
-   ```bash
-   vercel env add MODEL_PATH
-   # Enter: models/SP-U20_w-OppM_lr0.0003_final.pth
-   ```
-
-## Testing Locally
+Always test locally first:
 
 ```bash
-# Test the app locally
+# Navigate to project directory
+cd "d:\RL Project"
+
+# Run the app
 python app.py
 
-# Or with Vercel dev server
-vercel dev
+# Visit in browser
+# http://localhost:7860
 ```
 
-## File Structure for Deployment
+Verify:
+- ✅ Model loads without errors
+- ✅ Cards display correctly
+- ✅ Actions work properly
+- ✅ UI looks good
 
-```
-d:\RL Project/
-├── api/
-│   └── index.py          # Vercel serverless function entry
-├── core/                 # Your core package
-├── models/               # Trained models
-├── public/
-│   └── poker_cards/      # Card images
-├── app.py                # Main Gradio app
-├── running_config.yaml   # Config file
-├── requirements-vercel.txt
-├── vercel.json
-└── .vercelignore
-```
+## Space Settings
 
-## Recommended: Hugging Face Spaces
+### Make Space Public/Private
 
-Given the size constraints, **Hugging Face Spaces** is the most straightforward option:
+1. Go to your Space → Settings
+2. Change "Visibility" setting
+3. Save changes
 
-1. Create a Space at https://huggingface.co/new-space
-2. Upload these files:
-   - `app.py`
-   - `core/` directory
-   - `running_config.yaml`
-   - `models/SP-U20_w-OppM_lr0.0003_final.pth`
-   - `public/poker_cards/` directory
-   - Create `requirements.txt` with full dependencies
+### Add Custom Domain
 
-Your Space will be live at `https://huggingface.co/spaces/YOUR_USERNAME/SPACE_NAME`
+Hugging Face Spaces Pro tier supports custom domains.
+
+### Hardware Upgrades
+
+Free tier uses CPU. For faster inference:
+1. Go to Space → Settings → Hardware
+2. Upgrade to GPU (paid)
+
+## Resources
+
+- **HF Spaces Documentation**: https://huggingface.co/docs/hub/spaces
+- **Git LFS Guide**: https://git-lfs.github.com/
+- **Gradio Documentation**: https://gradio.app/docs/
+- **Your Space URL**: `https://huggingface.co/spaces/YOUR_USERNAME/YOUR_SPACE`
+
+## Support
+
+If you encounter issues:
+1. Check build logs in Space → Logs tab
+2. Verify all files are committed
+3. Test locally with `python app.py`
+4. Open an issue on GitHub: https://github.com/Echo-Lee/Leduc-holdem-Agent-PPO/issues
+
+---
+
+**Happy deploying! Your poker agent will be live in minutes!** 🎰🚀

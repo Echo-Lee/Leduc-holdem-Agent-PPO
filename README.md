@@ -4,13 +4,19 @@ Reinforcement Learning project implementing **PPO (Proximal Policy Optimization)
 
 ## 🎯 Features
 
+### Training & AI
 - **PPO Algorithm** with GAE (Generalized Advantage Estimation)
 - **Opponent Modeling** - Predicts opponent actions to improve decision-making
 - **Self-Play Training** - Agent improves by playing against past versions of itself
 - **Rule-Based Opponents** - Train against aggressive, conservative, or random strategies
-- **Gradio Web UI** - Play poker against your trained agent through an interactive interface
 - **W&B Integration** - Track training metrics with Weights & Biases
-- **Deployment Ready** - Deploy to Hugging Face Spaces, Vercel, or other platforms
+
+### UI & Deployment
+- **🎰 Dark Casino Theme** - Professional poker table interface with green felt and gold accents
+- **Glassmorphism Effects** - Modern translucent panels and smooth animations
+- **Responsive Design** - Beautiful card displays with shadows and hover effects
+- **Real-time Gameplay** - Instant AI responses with full action history
+- **One-Click Deployment** - Ready for Hugging Face Spaces
 
 ## 🐛 Recent Bug Fixes (2026-03-06)
 
@@ -102,49 +108,25 @@ Agent observation (76-dim):
 
 ## 🌐 Deployment
 
-### Option 1: Hugging Face Spaces (Recommended)
+### Hugging Face Spaces (Recommended)
 
-Best for ML apps with large dependencies. No size limits, free hosting.
+Perfect for ML apps with large dependencies. **No size limits, free hosting!**
 
-1. Create a Space at https://huggingface.co/new-space
-2. Upload: `app.py`, `core/`, `running_config.yaml`, trained model, card images
-3. Your app goes live automatically!
-
-### Option 2: ONNX Conversion (Smaller Size)
-
-Convert PyTorch model (~700MB) to ONNX format (~10MB runtime):
-
+**Quick Deploy:**
 ```bash
-# Install ONNX tools
-pip install onnx onnxruntime
-
-# Convert your model
-python convert_to_onnx.py --model models/YOUR_MODEL.pth --test
+# Use automated script
+chmod +x deploy_to_hf.sh
+./deploy_to_hf.sh YOUR_USERNAME texas-holdem-ppo
 ```
 
-### Option 3: Railway / Render
+**Manual Deploy:**
+1. Create a Space at https://huggingface.co/new-space (select Gradio SDK)
+2. Clone your Space and copy files
+3. Push to deploy
 
-Deploy to platforms with generous size limits:
+Your app will be live at: `https://huggingface.co/spaces/YOUR_USERNAME/YOUR_SPACE`
 
-```bash
-# Railway
-npm i -g @railway/cli
-railway login
-railway init
-railway up
-```
-
-### Option 4: Vercel
-
-**⚠️ Warning**: PyTorch is ~700MB, exceeding Vercel's 250MB limit. Use ONNX conversion first.
-
-```bash
-npm i -g vercel
-vercel login
-vercel
-```
-
-See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed deployment instructions.
+**See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed step-by-step instructions.**
 
 ## 📁 Project Structure
 
@@ -152,30 +134,20 @@ See [DEPLOYMENT.md](DEPLOYMENT.md) for detailed deployment instructions.
 d:\RL Project/
 ├── core/
 │   ├── agents/              # RL agents and rule-based opponents
-│   │   ├── base_agent.py
-│   │   ├── ppo_agent.py
-│   │   └── rule_based_agent.py
 │   ├── environments/        # Environment runner
-│   │   └── runner.py
 │   ├── networks/            # Neural network architectures
-│   │   ├── policy_value_network.py
-│   │   └── opponent_prediction.py
-│   └── utils/
-│       └── utils.py
+│   └── utils/               # Utility functions
 ├── models/                  # Saved model checkpoints
+├── poker_cards/             # Card images for UI
 ├── results/                 # Training plots and metrics
 ├── wandb/                   # W&B experiment tracking
-├── public/                  # Static assets for deployment
-│   └── poker_cards/         # Card images for UI
-├── api/                     # Vercel serverless functions
-│   └── index.py
 ├── core/main.py             # Training script
 ├── core/play_game.py        # Interactive gameplay UI
-├── app.py                   # Deployment-ready Gradio app
-├── convert_to_onnx.py       # Model conversion utility
-├── setup_deployment.py      # Deployment preparation helper
+├── app.py                   # Dark casino UI (deployment ready)
 ├── running_config.yaml      # Training configuration
 ├── requirements.txt         # Python dependencies
+├── deploy_to_hf.sh          # Automated HF Spaces deployment
+├── HF_README.md             # Hugging Face Space description
 └── DEPLOYMENT.md            # Deployment guide
 ```
 
